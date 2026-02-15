@@ -36,8 +36,12 @@ export function preValidateIPSQRData(params: IPSQRParams): {
     errors.push('Poziv na broj mora počinjati sa dve cifre');
   }
 
-  if (params.amount <= 0) {
-    errors.push('Iznos mora biti veći od 0');
+  if (params.amount < 0.01) {
+    errors.push('Iznos mora biti najmanje 0.01 (RSD0,01)');
+  }
+
+  if (params.amount > 99999999999999.99) {
+    errors.push('Iznos ne sme biti veći od 99999999999999,99');
   }
 
   if (!params.receiverName || params.receiverName.trim().length === 0) {
@@ -46,6 +50,19 @@ export function preValidateIPSQRData(params: IPSQRParams): {
 
   if (!params.paymentPurpose || params.paymentPurpose.trim().length === 0) {
     errors.push('Svrha plaćanja je obavezna');
+  }
+
+  const pipeFields: { name: string; value: string | undefined }[] = [
+    { name: 'Ime primaoca', value: params.receiverName },
+    { name: 'Svrha plaćanja', value: params.paymentPurpose },
+    { name: 'Poziv na broj', value: params.paymentReference },
+    { name: 'Ime platioca', value: params.payerName },
+    { name: 'Adresa platioca', value: params.payerAddress },
+  ];
+  for (const field of pipeFields) {
+    if (field.value && field.value.includes('|')) {
+      errors.push(`Polje "${field.name}" ne sme sadržati znak "|"`);
+    }
   }
 
   return {
@@ -130,27 +147,25 @@ export async function generateIPSQRCodeWithAPI(params: IPSQRParams, maxRetries =
   const formattedAmount = `${currency}${amount.toFixed(2).replace('.', ',')}`;
   const cleanAccount = receiverAccount.replace(/-/g, '');
 
-  const qrDataObject: Record<string, string> = {
-    K: 'PR',
-    V: '01',
-    C: '1',
-    R: cleanAccount,
-    N: receiverName,
-    I: formattedAmount,
-    SF: paymentCode,
-    S: paymentPurpose,
-    RO: paymentReference
-  };
+  const qrDataParts: string[] = [
+    'K:PR',
+    'V:01',
+    'C:1',
+    `R:${cleanAccount}`,
+    `N:${receiverName}`,
+    `I:${formattedAmount}`,
+    `SF:${paymentCode}`,
+    `S:${paymentPurpose}`,
+    `RO:${paymentReference}`
+  ];
 
   if (payerName && payerAddress) {
-    qrDataObject.P = `${payerName}\r\n${payerAddress}`;
+    qrDataParts.push(`P:${payerName}\n${payerAddress}`);
   } else if (payerName) {
-    qrDataObject.P = payerName;
+    qrDataParts.push(`P:${payerName}`);
   }
 
-  const qrDataString = Object.entries(qrDataObject)
-    .map(([key, value]) => `${key}:${value}`)
-    .join('|');
+  const qrDataString = qrDataParts.join('|');
 
   let lastError: IPSQRResult | null = null;
 
@@ -191,13 +206,15 @@ export function generateIPSQRCode(params: IPSQRParams): string {
     paymentPurpose,
     paymentReference,
     currency = 'RSD',
-    paymentCode = '289'
+    paymentCode = '289',
+    payerName,
+    payerAddress
   } = params;
 
-  const formattedAmount = amount.toFixed(2);
+  const formattedAmount = amount.toFixed(2).replace('.', ',');
   const cleanAccount = receiverAccount.replace(/-/g, '');
 
-  const qrData = [
+  const qrData: string[] = [
     'K:PR',
     'V:01',
     'C:1',
@@ -207,9 +224,15 @@ export function generateIPSQRCode(params: IPSQRParams): string {
     `SF:${paymentCode}`,
     `S:${paymentPurpose}`,
     `RO:${paymentReference}`
-  ].join('|');
+  ];
 
-  return qrData;
+  if (payerName && payerAddress) {
+    qrData.push(`P:${payerName}\n${payerAddress}`);
+  } else if (payerName) {
+    qrData.push(`P:${payerName}`);
+  }
+
+  return qrData.join('|');
 }
 
 export async function validateIPSQRCode(qrDataString: string): Promise<{
