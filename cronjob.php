@@ -685,7 +685,26 @@ file_put_contents(
     		$filename = str_replace('%20', '_', $imageNameParts['filename']);
     		$filepath = "{$dirpath}/{$filename}.jpg";
 
-    		$im = imageCreateFromAny($pathToOriginalImage);
+    		//NOTE: Download image to a local temp file using curl to avoid getimagesize() and
+    		//      imagecreatefrom*() failing when allow_url_fopen is disabled in php.ini
+    		$tmpFile = tempnam(sys_get_temp_dir(), 'crm_img_');
+    		$_ch = curl_init($pathToOriginalImage);
+    		curl_setopt($_ch, CURLOPT_RETURNTRANSFER, true);
+    		curl_setopt($_ch, CURLOPT_SSL_VERIFYPEER, false);
+    		curl_setopt($_ch, CURLOPT_SSLVERSION, 6);
+    		curl_setopt($_ch, CURLOPT_FOLLOWLOCATION, true);
+    		curl_setopt($_ch, CURLOPT_TIMEOUT, 30);
+    		$_imageData = curl_exec($_ch);
+    		$_httpCode = curl_getinfo($_ch, CURLINFO_HTTP_CODE);
+    		curl_close($_ch);
+    		if ($_imageData === false || $_httpCode !== 200) {
+    			@unlink($tmpFile);
+    			continue;
+    		}
+    		file_put_contents($tmpFile, $_imageData);
+
+    		$im = imageCreateFromAny($tmpFile);
+    		@unlink($tmpFile);
     		if (empty($im)) {
     			//TODO: Notify?
     			continue;
